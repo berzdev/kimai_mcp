@@ -393,7 +393,7 @@ class RemoteMCPServer:
 
             body = await request.body()
             try:
-                message = types.jsonrpc_message_adapter.validate_json(body, by_name=False)
+                message = types.JSONRPCMessage.model_validate_json(body)
             except ValidationError as err:
                 await writer.send(err)
                 return Response("Could not parse message", status_code=400)
