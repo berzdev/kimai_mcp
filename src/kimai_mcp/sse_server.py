@@ -11,18 +11,19 @@ Security features:
 """
 
 import argparse
-import json
 import logging
 import os
 import secrets
 import uuid
 from contextlib import asynccontextmanager
 from typing import Optional, Union
+from uuid import UUID
 
 try:
     import uvicorn
     from fastapi import FastAPI, Header, HTTPException, Request
-    from fastapi.responses import StreamingResponse
+    from fastapi.responses import Response
+    from pydantic import ValidationError
     from starlette.middleware.cors import CORSMiddleware
 except ImportError as e:
     raise ImportError(
@@ -30,7 +31,9 @@ except ImportError as e:
         "Install with: pip install kimai-mcp[server]"
     ) from e
 
+from mcp import types
 from mcp.server.sse import SseServerTransport
+from mcp.shared.message import ServerMessageMetadata, SessionMessage
 from .server import KimaiMCPServer, __version__
 from .security import (
     RateLimitConfig,
@@ -258,6 +261,7 @@ class RemoteMCPServer:
             version=__version__,
             lifespan=self.lifespan,
         )
+        transport = SseServerTransport("/messages")
 
         # Add CORS middleware with secure configuration
         # SECURITY: Do not allow credentials with wildcard origins
@@ -333,45 +337,27 @@ class RemoteMCPServer:
             )
 
             try:
-                # Create SSE transport
-                async with SseServerTransport("/messages") as transport:
-                    # Connect transport to MCP server
+                async with transport.connect_sse(
+                    request.scope,
+                    request.receive,
+                    request._send,  # type: ignore[attr-defined]
+                ) as streams:
                     await mcp_server.server.run(
-                        transport.read_stream,
-                        transport.write_stream,
+                        streams[0],
+                        streams[1],
                         mcp_server.server.create_initialization_options(),
                     )
-
-                    # Stream events
-                    async def event_generator():
-                        try:
-                            async for event in transport.sse():
-                                yield event
-                        finally:
-                            # Cleanup session when connection closes
-                            await self.cleanup_session(session_id)
-
-                    return StreamingResponse(
-                        event_generator(),
-                        media_type="text/event-stream",
-                        headers={
-                            "Cache-Control": "no-cache, no-store, must-revalidate",
-                            "Connection": "keep-alive",
-                            "X-Accel-Buffering": "no",  # Disable nginx buffering
-                            "Pragma": "no-cache",
-                            # X-Session-ID removed for security - session handled internally
-                        },
-                    )
             except Exception:
-                # Cleanup on error
-                await self.cleanup_session(session_id)
                 raise
+            finally:
+                await self.cleanup_session(session_id)
+
+            return Response()
 
         @app.post("/messages")
         async def handle_messages(
             request: Request,
             authorization: Optional[str] = Header(None),
-            x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
         ):
             """Handle incoming messages from client.
 
@@ -392,15 +378,30 @@ class RemoteMCPServer:
                     headers={"WWW-Authenticate": "Bearer"},
                 )
 
-            # Get message from request body
-            try:
-                _ = await request.json()
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=400, detail="Invalid JSON")
+            session_id_param = request.query_params.get("session_id")
+            if session_id_param is None:
+                return Response("session_id is required", status_code=400)
 
-            # Note: Message handling is done via the SSE transport
-            # This endpoint acknowledges receipt
-            return {"status": "received"}
+            try:
+                session_id = UUID(hex=session_id_param)
+            except ValueError:
+                return Response("Invalid session ID", status_code=400)
+
+            writer = transport._read_stream_writers.get(session_id)
+            if not writer:
+                return Response("Could not find session", status_code=404)
+
+            body = await request.body()
+            try:
+                message = types.jsonrpc_message_adapter.validate_json(body, by_name=False)
+            except ValidationError as err:
+                await writer.send(err)
+                return Response("Could not parse message", status_code=400)
+
+            metadata = ServerMessageMetadata(request_context=request)
+            session_message = SessionMessage(message, metadata=metadata)
+            await writer.send(session_message)
+            return Response("Accepted", status_code=202)
 
         return app
 
