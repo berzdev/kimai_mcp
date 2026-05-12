@@ -52,16 +52,7 @@ class KimaiClient:
         self.api_token = api_token
         self.timeout = timeout
         self.ssl_verify = ssl_verify
-        self._client = httpx.AsyncClient(
-            base_url=f"{self.base_url}/api",
-            headers={
-                "Authorization": f"Bearer {api_token}",
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            },
-            timeout=timeout,
-            verify=ssl_verify
-        )
+        self._client = self._build_client()
     
     async def __aenter__(self):
         """Async context manager entry."""
@@ -74,21 +65,38 @@ class KimaiClient:
     async def close(self):
         """Close the HTTP client."""
         await self._client.aclose()
-    
+
+    def _build_client(self) -> httpx.AsyncClient:
+        """Build a fresh httpx AsyncClient with current configuration."""
+        return httpx.AsyncClient(
+            base_url=f"{self.base_url}/api",
+            headers={
+                "Authorization": f"Bearer {self.api_token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            timeout=self.timeout,
+            verify=self.ssl_verify
+        )
+
     async def _request(self, method: str, endpoint: str, **kwargs) -> Union[Dict, List]:
         """Make an API request.
-        
+
         Args:
             method: HTTP method
             endpoint: API endpoint (without /api prefix)
             **kwargs: Additional request parameters
-            
+
         Returns:
             Parsed JSON response
-            
+
         Raises:
             KimaiAPIError: On API errors
         """
+        if self._client.is_closed:
+            logger.info("HTTP client was closed, recreating connection...")
+            self._client = self._build_client()
+
         try:
             response = await self._client.request(method, endpoint, **kwargs)
             response.raise_for_status()

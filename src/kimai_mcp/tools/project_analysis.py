@@ -14,22 +14,52 @@ def analyze_project_team_tool() -> Tool:
     """Define the analyze project team tool."""
     return Tool(
         name="analyze_project_team",
-        description="Comprehensive analysis of all team members working on a project. Automatically finds project by name, fetches ALL timesheets from ALL users, and provides detailed statistics.",
+        description="""Comprehensive time analysis for a project across team members.
+
+Finds the project by name (partial match), fetches ALL timesheets for ALL matching users in the date range, and returns per-user totals, activity breakdowns, and overall statistics.
+
+COMMON TASKS:
+- Full team analysis: project_name="My Project", begin="2025-01-01T00:00:00", end="2025-06-30T23:59:59"
+- Single user:        ..., user_scope="specific", user="USER_ID"
+- One team only:      ..., user_scope="team", team=TEAM_ID
+
+NOTE: Requires permissions to read other users' timesheets (admin or team lead).""",
         inputSchema={
             "type": "object",
             "required": ["project_name", "begin", "end"],
             "properties": {
-                "project_name": {"type": "string", "description": "Project name (will be matched automatically)"},
-                "begin": {"type": "string", "format": "date-time", "description": "Start date (ISO format, e.g., '2025-01-01')"},
-                "end": {"type": "string", "format": "date-time", "description": "End date (ISO format, e.g., '2025-06-30')"},
-                "user_scope": {
-                    "type": "string", 
-                    "enum": ["self", "all", "specific", "team"],
-                    "description": "Analysis scope: 'self' (current user), 'all' (all users), 'specific' (particular user), 'team' (team members only). Default: 'all'"
+                "project_name": {
+                    "type": "string",
+                    "description": "Project name or partial name — matched case-insensitively. If multiple projects match, you'll be prompted to be more specific."
                 },
-                "user": {"type": "string", "description": "Specific user ID (required if user_scope is 'specific')"},
-                "team": {"type": "integer", "description": "Team ID (required if user_scope is 'team')"},
-                "include_details": {"type": "boolean", "description": "Include detailed activity breakdown", "default": True}
+                "begin": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Analysis start date — ISO 8601 format: YYYY-MM-DDTHH:MM:SS (e.g. '2025-01-01T00:00:00')"
+                },
+                "end": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Analysis end date — ISO 8601 format: YYYY-MM-DDTHH:MM:SS (e.g. '2025-06-30T23:59:59')"
+                },
+                "user_scope": {
+                    "type": "string",
+                    "enum": ["self", "all", "specific", "team"],
+                    "description": "all: all users (default). self: only current user. specific: one user — also set user param. team: team members only — also set team param."
+                },
+                "user": {
+                    "type": "string",
+                    "description": "User ID — required when user_scope is 'specific'"
+                },
+                "team": {
+                    "type": "integer",
+                    "description": "Team ID — required when user_scope is 'team'. Use entity tool (type=team, action=list) to find IDs."
+                },
+                "include_details": {
+                    "type": "boolean",
+                    "description": "Include per-activity breakdown in output (default: true)",
+                    "default": True
+                }
             }
         }
     )

@@ -9,32 +9,48 @@ def team_access_tool() -> Tool:
     """Define the consolidated team access management tool."""
     return Tool(
         name="team_access",
-        description="Universal team access management tool for member management and permission control.",
+        description="""Manage team membership and grant/revoke team access to customers, projects, and activities.
+
+Two distinct use cases:
+1. MEMBER MANAGEMENT — who is in the team (requires: team_id, action, user_id)
+2. ACCESS CONTROL — which entities the team can see (requires: team_id, action, target, target_id)
+
+COMMON TASKS:
+- Add user to team:         action="add_member",    team_id=ID, user_id=USER_ID
+- Remove user from team:    action="remove_member", team_id=ID, user_id=USER_ID
+- Grant project access:     action="grant",  team_id=ID, target="project",  target_id=PROJECT_ID
+- Revoke customer access:   action="revoke", team_id=ID, target="customer", target_id=CUSTOMER_ID
+
+NOTE: To list teams or create/delete a team, use the entity tool with type="team".""",
         inputSchema={
             "type": "object",
             "required": ["team_id", "action"],
             "properties": {
                 "team_id": {
                     "type": "integer",
-                    "description": "The team ID to operate on"
+                    "description": "The team ID to operate on (use entity tool with type=team, action=list to find IDs)"
                 },
                 "action": {
                     "type": "string",
                     "enum": ["add_member", "remove_member", "grant", "revoke"],
-                    "description": "The action to perform"
+                    "description": """Action to perform:
+- add_member: Add a user to the team. Requires: user_id
+- remove_member: Remove a user from the team. Requires: user_id
+- grant: Grant the team access to an entity. Requires: target, target_id
+- revoke: Revoke the team's access to an entity. Requires: target, target_id"""
+                },
+                "user_id": {
+                    "type": "integer",
+                    "description": "User ID — required for add_member and remove_member actions"
                 },
                 "target": {
                     "type": "string",
                     "enum": ["customer", "project", "activity"],
-                    "description": "The target type for grant/revoke actions"
-                },
-                "user_id": {
-                    "type": "integer",
-                    "description": "User ID (required for add_member/remove_member actions)"
+                    "description": "Entity type to grant/revoke access to — required for grant and revoke actions"
                 },
                 "target_id": {
                     "type": "integer",
-                    "description": "Target entity ID (required for grant/revoke actions)"
+                    "description": "ID of the customer, project, or activity — required for grant and revoke actions"
                 }
             }
         }

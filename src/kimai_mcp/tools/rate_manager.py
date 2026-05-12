@@ -10,13 +10,20 @@ def rate_tool() -> Tool:
     """Define the consolidated rate management tool."""
     return Tool(
         name="rate",
-        description="""Rate management for customers, projects, and activities.
+        description="""Manage billing rates for customers, projects, and activities.
 
-- List rates: action=list, entity="project", entity_id=ID
-- Add rate: action=add, entity="project", entity_id=ID, data={rate:50}
-- User-specific rate: action=add, ..., data={rate:50, user:USER_ID}
+Rates define how time is billed. A rate can be:
+- Hourly rate (is_fixed=false): multiplied by hours worked
+- Fixed rate (is_fixed=true): flat amount regardless of hours
+- User-specific: applies only when that user tracks time on the entity
 
-NOTE: For user hourly_rate preference, use entity tool with set_preferences instead.""",
+COMMON TASKS:
+- List all rates for a project: action="list", entity="project", entity_id=ID
+- Add hourly rate:              action="add",  entity="project", entity_id=ID, data={rate:80.0}
+- Add user-specific rate:       action="add",  entity="activity", entity_id=ID, data={rate:60.0, user:USER_ID}
+- Delete a rate:                action="delete", entity="project", entity_id=ID, rate_id=RATE_ID
+
+NOTE: For a user's default hourly/internal rate, use the entity tool: action=set_preferences, type=user, preferences=[{name:"hourly_rate", value:"75"}]""",
         inputSchema={
             "type": "object",
             "required": ["entity", "entity_id", "action"],
@@ -28,25 +35,38 @@ NOTE: For user hourly_rate preference, use entity tool with set_preferences inst
                 },
                 "entity_id": {
                     "type": "integer",
-                    "description": "The ID of the entity (customer, project, or activity)"
+                    "description": "The ID of the customer, project, or activity"
                 },
                 "action": {
                     "type": "string",
                     "enum": ["list", "add", "delete"],
-                    "description": "The action to perform"
+                    "description": "list: show all rates. add: create a new rate (requires data). delete: remove a rate (requires rate_id)."
                 },
                 "rate_id": {
                     "type": "integer",
-                    "description": "Rate ID (required for delete action)"
+                    "description": "Rate ID to delete — required for delete action (get it from the list action)"
                 },
                 "data": {
                     "type": "object",
-                    "description": "Rate data for add action",
+                    "description": "Rate definition — required for add action",
+                    "required": ["rate"],
                     "properties": {
-                        "user": {"type": "integer", "description": "User ID for the rate"},
-                        "rate": {"type": "number", "description": "The rate value"},
-                        "internal_rate": {"type": "number", "description": "The internal rate value"},
-                        "is_fixed": {"type": "boolean", "description": "Whether this is a fixed rate"}
+                        "rate": {
+                            "type": "number",
+                            "description": "Billing rate value (e.g. 80.0). Interpreted as hourly rate unless is_fixed=true."
+                        },
+                        "internal_rate": {
+                            "type": "number",
+                            "description": "Internal cost rate (not shown on invoices, for cost tracking)"
+                        },
+                        "is_fixed": {
+                            "type": "boolean",
+                            "description": "true = fixed flat amount per timesheet entry. false (default) = hourly rate multiplied by duration."
+                        },
+                        "user": {
+                            "type": "integer",
+                            "description": "User ID — if set, this rate applies only when that user tracks time. Omit for a global rate."
+                        }
                     }
                 }
             }

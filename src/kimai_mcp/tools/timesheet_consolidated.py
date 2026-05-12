@@ -14,15 +14,17 @@ def timesheet_tool() -> Tool:
     """Define the consolidated timesheet management tool."""
     return Tool(
         name="timesheet",
-        description="""Timesheet management for time entries.
+        description="""Manage completed time entries (timesheets with a start and end time).
 
 COMMON TASKS:
-- List my timesheets: action=list, filters={user_scope:"self"}
-- List all timesheets: action=list, filters={user_scope:"all"}
-- Create entry: action=create, data={project:ID, activity:ID, begin:"...", end:"..."}
-- Export entries: action=batch_export, ids=[...]
+- List my timesheets:       action="list", filters={user_scope:"self"}
+- List by date range:       action="list", filters={user_scope:"self", begin:"2025-01-01T00:00:00", end:"2025-01-31T23:59:59"}
+- List all users' entries:  action="list", filters={user_scope:"all"}
+- Create completed entry:   action="create", data={project:ID, activity:ID, begin:"2025-01-15T09:00:00", end:"2025-01-15T17:00:00"}
+- Mark entries exported:    action="batch_export", ids=[1,2,3]
 
-NOTE: For running timers (no end time), use the 'timer' tool instead.""",
+NOTE: For running timers without an end time, use the 'timer' tool instead.
+DATE FORMAT: Always use ISO 8601 — YYYY-MM-DDTHH:MM:SS (e.g. 2025-01-15T09:00:00)""",
         inputSchema={
             "type": "object",
             "required": ["action"],
@@ -30,92 +32,152 @@ NOTE: For running timers (no end time), use the 'timer' tool instead.""",
                 "action": {
                     "type": "string",
                     "enum": ["list", "get", "create", "update", "delete", "duplicate", "export_toggle", "meta_update", "user_guide", "batch_delete", "batch_export"],
-                    "description": """The action to perform:
-                    - list: List timesheets
-                    - create: Create a new timesheet
-                    - get: Get a timesheet by ID
-                    - update: Update a timesheet by ID
-                    - delete: Delete a timesheet by ID
-                    - duplicate: Duplicate a timesheet by ID
-                    - export_toggle: Toggle export status (bool) for a timesheet by ID
-                    - meta_update: Update meta fields for a timesheet by ID
-                    - user_guide: Gives information about how to limit users when listing timesheets and lists available users.
-                    - batch_delete: Delete multiple timesheets by IDs
-                    - batch_export: Mark multiple timesheets as exported by IDs
-                    """
+                    "description": """Action to perform:
+- list: List timesheets matching filters. Use filters.user_scope to control which users.
+- get: Get a single timesheet by ID.
+- create: Create a completed entry. Requires data.project and data.activity (IDs).
+- update: Update an existing entry by ID.
+- delete: Delete a timesheet by ID.
+- duplicate: Create a copy of a timesheet by ID.
+- export_toggle: Toggle the export flag on a timesheet by ID.
+- meta_update: Update custom meta fields on a timesheet by ID.
+- user_guide: Returns available users and guidance on user_scope filtering.
+- batch_delete: Delete multiple timesheets. Requires ids=[...].
+- batch_export: Mark multiple timesheets as exported. Requires ids=[...]."""
                 },
                 "id": {
                     "type": "integer",
-                    "description": "Timesheet ID (required for get, update, delete, duplicate, export_toggle, meta_update)"
+                    "description": "Timesheet ID — required for get, update, delete, duplicate, export_toggle, meta_update"
                 },
                 "ids": {
                     "type": "array",
                     "items": {"type": "integer"},
-                    "description": "List of timesheet IDs for batch operations (batch_delete, batch_export)"
+                    "description": "List of timesheet IDs — required for batch_delete and batch_export"
                 },
                 "filters": {
                     "type": "object",
-                    "description": "Filters for list action",
+                    "description": "Filters for list action. Combine freely.",
                     "properties": {
                         "user_scope": {
                             "type": "string",
                             "enum": ["self", "all", "specific"],
-                            "description": "User scope: 'self' (current user), 'all' (all users), 'specific' (particular user)"
+                            "description": "self: only current user's entries (default). all: all users (requires admin/teamlead). specific: one user — also set filters.user to the user ID."
                         },
                         "user": {
-                            "type": "string",
-                            "description": "User ID when user_scope is 'specific'"
+                            "type": "integer",
+                            "description": "User ID — required when user_scope is 'specific'. Use user_current tool to find your own ID."
                         },
-                        "project": {"type": "integer"},
-                        "activity": {"type": "integer"},
-                        "customer": {"type": "integer"},
+                        "project": {
+                            "type": "integer",
+                            "description": "Filter by project ID"
+                        },
+                        "activity": {
+                            "type": "integer",
+                            "description": "Filter by activity ID"
+                        },
+                        "customer": {
+                            "type": "integer",
+                            "description": "Filter by customer ID"
+                        },
                         "begin": {
                             "type": "string",
                             "format": "date-time",
-                            "description": "Start date and time filter (format: YYYY-MM-DDThh:mm:ss, e.g., 2023-10-27T09:30:00)."
+                            "description": "Only entries starting on or after this datetime (ISO 8601: YYYY-MM-DDTHH:MM:SS, e.g. 2025-01-01T00:00:00)"
                         },
                         "end": {
                             "type": "string",
                             "format": "date-time",
-                            "description": "End date and time filter (format: YYYY-MM-DDThh:mm:ss, e.g., 2023-10-27T17:00:00)."
+                            "description": "Only entries ending on or before this datetime (ISO 8601: YYYY-MM-DDTHH:MM:SS, e.g. 2025-01-31T23:59:59)"
                         },
-                        "exported": {"type": "integer", "enum": [0, 1]},
-                        "active": {"type": "integer", "enum": [0, 1]},
-                        "billable": {"type": "integer", "enum": [0, 1]},
-                        "page": {"type": "integer", "default": 1, "description": "Page number for pagination. Default is 1."},
-                        "size": {"type": "integer", "default": 50, "description": "Number of records per page. Default is 50."},
-                        "term": {"type": "string"},
-                        "include_user_list": {"type": "boolean", "default": False},
-                        "calculate_stats": {"type": "boolean", "default": False, "description": "Calculate statistics from the results"},
-                        "stats_format": {"type": "string", "enum": ["summary", "detailed", "json"], "default": "summary"},
-                        "breakdown_by_year": {"type": "boolean", "default": False, "description": "Break down statistics by year (auto-enabled if time span > 1 year)"}
+                        "exported": {
+                            "type": "integer",
+                            "enum": [0, 1],
+                            "description": "0 = not yet exported, 1 = already exported"
+                        },
+                        "active": {
+                            "type": "integer",
+                            "enum": [0, 1],
+                            "description": "0 = completed entries only, 1 = currently running timers only"
+                        },
+                        "billable": {
+                            "type": "integer",
+                            "enum": [0, 1],
+                            "description": "0 = non-billable entries only, 1 = billable entries only"
+                        },
+                        "term": {
+                            "type": "string",
+                            "description": "Full-text search across description, project name, activity name, and tags"
+                        },
+                        "page": {"type": "integer", "default": 1, "description": "Page number for pagination (default: 1)"},
+                        "size": {"type": "integer", "default": 50, "description": "Records per page (default: 50, max: 1000)"},
+                        "include_user_list": {"type": "boolean", "default": False, "description": "Include list of available users in the response"},
+                        "calculate_stats": {"type": "boolean", "default": False, "description": "Calculate duration/billing statistics from the result set"},
+                        "stats_format": {"type": "string", "enum": ["summary", "detailed", "json"], "default": "summary", "description": "Format for statistics output"},
+                        "breakdown_by_year": {"type": "boolean", "default": False, "description": "Break statistics down by year (auto-enabled when time span > 1 year)"}
                     }
                 },
                 "data": {
                     "type": "object",
-                    "description": "Data for create/update actions",
+                    "description": "Time entry data for create/update actions",
+                    "required": ["project", "activity"],
                     "properties": {
-                        "project": {"type": "integer"},
-                        "activity": {"type": "integer"},
-                        "begin": {"type": "string", "format": "date-time"},
-                        "end": {"type": "string", "format": "date-time"},
-                        "description": {"type": "string"},
-                        "tags": {"type": "string"},
-                        "user": {"type": "integer"},
-                        "billable": {"type": "boolean"},
-                        "fixedRate": {"type": "number"},
-                        "hourlyRate": {"type": "number"},
-                        "break": {"type": "integer", "description": "Break duration in seconds"}
+                        "project": {
+                            "type": "integer",
+                            "description": "Project ID — required for create. Use entity tool with type=project, action=list to find IDs."
+                        },
+                        "activity": {
+                            "type": "integer",
+                            "description": "Activity ID — required for create. Use entity tool with type=activity, action=list to find IDs."
+                        },
+                        "begin": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "Start datetime in ISO 8601 format: YYYY-MM-DDTHH:MM:SS (e.g. 2025-01-15T09:00:00)"
+                        },
+                        "end": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "End datetime in ISO 8601 format: YYYY-MM-DDTHH:MM:SS. Required for create; omit to create a running timer (use timer tool instead)."
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Work description / notes for this time entry"
+                        },
+                        "tags": {
+                            "type": "string",
+                            "description": "Comma-separated tag names (e.g. 'billable,reviewed')"
+                        },
+                        "user": {
+                            "type": "integer",
+                            "description": "User ID — defaults to current user. Set to create an entry on behalf of another user (requires permission)."
+                        },
+                        "billable": {
+                            "type": "boolean",
+                            "description": "Whether this entry is billable (overrides project/activity default)"
+                        },
+                        "fixedRate": {
+                            "type": "number",
+                            "description": "Override fixed billing rate for this entry"
+                        },
+                        "hourlyRate": {
+                            "type": "number",
+                            "description": "Override hourly billing rate for this entry"
+                        },
+                        "break": {
+                            "type": "integer",
+                            "description": "Break duration in seconds (e.g. 1800 = 30 min break). Subtracted from billable time."
+                        }
                     }
                 },
                 "meta": {
                     "type": "array",
-                    "description": "Meta fields for meta_update action",
+                    "description": "Meta fields for meta_update action. The meta field must be defined in Kimai admin settings.",
                     "items": {
                         "type": "object",
+                        "required": ["name", "value"],
                         "properties": {
-                            "name": {"type": "string"},
-                            "value": {}
+                            "name": {"type": "string", "description": "Meta field name (case-sensitive)"},
+                            "value": {"type": "string", "description": "New value for the meta field"}
                         }
                     }
                 },
@@ -133,13 +195,19 @@ def timer_tool() -> Tool:
     """Define the timer management tool."""
     return Tool(
         name="timer",
-        description="""Timer management for running time tracking.
+        description="""Start, stop, and manage running timers (time entries without an end time).
 
-- Start timer: action=start, data={project:ID, activity:ID}
-- Stop timer: action=stop, id=TIMESHEET_ID
-- Show active: action=active
+COMMON TASKS:
+- Start tracking now:   action="start", data={project:ID, activity:ID}
+- Check what's running: action="active"
+- Stop a timer:         action="stop",    id=TIMESHEET_ID
+- Restart last entry:   action="restart", id=TIMESHEET_ID
 
-NOTE: Creates timesheet entries without end time. Use 'timesheet' tool for completed entries.""",
+WHEN TO USE THIS vs timesheet tool:
+- Use timer to start/stop live tracking (no end time yet)
+- Use timesheet to create/edit completed entries (with start AND end time)
+
+NOTE: project and activity IDs are required to start a timer. Use entity tool with type=project/activity, action=list to find IDs.""",
         inputSchema={
             "type": "object",
             "required": ["action"],
@@ -147,31 +215,49 @@ NOTE: Creates timesheet entries without end time. Use 'timesheet' tool for compl
                 "action": {
                     "type": "string",
                     "enum": ["start", "stop", "restart", "active", "recent"],
-                    "description": "The timer action to perform"
+                    "description": """Action to perform:
+- start: Begin a new timer now. Requires data.project and data.activity.
+- stop: Stop a running timer by ID. Requires id.
+- restart: Restart a previously stopped entry as a new timer. Requires id.
+- active: List all currently running timers for the current user.
+- recent: List recently completed entries (use size and begin to limit)."""
                 },
                 "id": {
                     "type": "integer",
-                    "description": "Timesheet ID (required for stop and restart actions)"
+                    "description": "Timesheet ID — required for stop and restart actions"
                 },
                 "data": {
                     "type": "object",
-                    "description": "Data for start action",
+                    "description": "Timer data — required for start action",
+                    "required": ["project", "activity"],
                     "properties": {
-                        "project": {"type": "integer", "description": "Project ID"},
-                        "activity": {"type": "integer", "description": "Activity ID"},
-                        "description": {"type": "string", "description": "Timer description"},
-                        "tags": {"type": "string", "description": "Comma-separated tags"}
+                        "project": {
+                            "type": "integer",
+                            "description": "Project ID — required. Use entity tool (type=project, action=list) to find."
+                        },
+                        "activity": {
+                            "type": "integer",
+                            "description": "Activity ID — required. Use entity tool (type=activity, action=list) to find."
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Optional work description shown on the time entry"
+                        },
+                        "tags": {
+                            "type": "string",
+                            "description": "Optional comma-separated tag names (e.g. 'billable,meeting')"
+                        }
                     }
                 },
                 "size": {
                     "type": "integer",
-                    "description": "Number of recent entries to return (for recent action)",
+                    "description": "Number of recent entries to return (recent action, default: 10)",
                     "default": 10
                 },
                 "begin": {
                     "type": "string",
                     "format": "date-time",
-                    "description": "Only entries after this date (for recent action)"
+                    "description": "Only return entries after this datetime (recent action, ISO 8601: YYYY-MM-DDTHH:MM:SS)"
                 }
             }
         }

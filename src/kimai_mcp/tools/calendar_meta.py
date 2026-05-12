@@ -10,7 +10,16 @@ def calendar_tool() -> Tool:
     """Define the consolidated calendar tool."""
     return Tool(
         name="calendar",
-        description="Universal calendar tool for accessing absences and holidays data.",
+        description="""Calendar view of absences and public holidays as calendar events (title, start, end, color).
+
+WHEN TO USE THIS vs absence tool:
+- Use calendar for visual/date-range overview (e.g., "show me who is off in December")
+- Use absence tool for managing absences (create, approve, list with status filters)
+
+COMMON TASKS:
+- Team absence overview: type="absences", filters={begin:"2024-12-01", end:"2024-12-31"}
+- Public holidays for a period: type="holidays", filters={begin:"2025-01-01", end:"2025-12-31"}
+- One user's absences: type="absences", filters={user:ID, begin:"2025-01-01", end:"2025-06-30"}""",
         inputSchema={
             "type": "object",
             "required": ["type"],
@@ -18,25 +27,25 @@ def calendar_tool() -> Tool:
                 "type": {
                     "type": "string",
                     "enum": ["absences", "holidays"],
-                    "description": "The type of calendar data to retrieve"
+                    "description": "absences: absence events for users. holidays: public/national holidays configured in Kimai."
                 },
                 "filters": {
                     "type": "object",
-                    "description": "Filters for calendar data",
+                    "description": "Date range and user filters. begin/end are strongly recommended to limit results.",
                     "properties": {
                         "user": {
                             "type": "integer",
-                            "description": "User ID filter (for absences)"
+                            "description": "Filter by user ID (absences only). Omit to get all users."
                         },
                         "begin": {
                             "type": "string",
                             "format": "date",
-                            "description": "Start date filter (YYYY-MM-DD)"
+                            "description": "Start of date range (YYYY-MM-DD, e.g. 2025-01-01)"
                         },
                         "end": {
                             "type": "string",
                             "format": "date",
-                            "description": "End date filter (YYYY-MM-DD)"
+                            "description": "End of date range (YYYY-MM-DD, e.g. 2025-12-31)"
                         }
                     }
                 }
@@ -49,38 +58,50 @@ def meta_tool() -> Tool:
     """Define the consolidated meta fields tool."""
     return Tool(
         name="meta",
-        description="Universal meta fields management tool for custom field operations across all entity types.",
+        description="""Update custom meta fields on existing entities (customer, project, activity, timesheet).
+
+WHEN TO USE THIS vs entity tool:
+- Use meta tool to update meta fields on an EXISTING entity (by ID)
+- Use entity tool (action=create/update, data.metaFields=[...]) to set meta fields when creating or updating an entity in the same call
+
+NOTE: Each meta field is sent as a separate API call. Multiple fields in data[] are processed one by one.
+
+COMMON TASKS:
+- Update project meta field: entity="project", entity_id=ID, action="update", data=[{name:"field_name", value:"field_value"}]
+- Update multiple fields: data=[{name:"cost_center", value:"CC-123"}, {name:"client_ref", value:"REF-456"}]""",
         inputSchema={
             "type": "object",
-            "required": ["entity", "entity_id", "action"],
+            "required": ["entity", "entity_id", "action", "data"],
             "properties": {
                 "entity": {
                     "type": "string",
                     "enum": ["customer", "project", "activity", "timesheet"],
-                    "description": "The entity type to manage meta fields for"
+                    "description": "The entity type whose meta fields to update"
                 },
                 "entity_id": {
                     "type": "integer",
-                    "description": "The ID of the entity"
+                    "description": "The ID of the existing entity to update"
                 },
                 "action": {
                     "type": "string",
                     "enum": ["update"],
-                    "description": "The action to perform (currently only update is supported)"
+                    "description": "Action to perform. Only 'update' is supported — meta fields cannot be deleted via API."
                 },
                 "data": {
                     "type": "array",
-                    "description": "Meta field data for update action",
+                    "description": "List of meta fields to update. The meta field must already be defined in Kimai admin settings.",
+                    "minItems": 1,
                     "items": {
                         "type": "object",
                         "required": ["name", "value"],
                         "properties": {
                             "name": {
                                 "type": "string",
-                                "description": "Meta field name"
+                                "description": "Meta field name as configured in Kimai (case-sensitive)"
                             },
                             "value": {
-                                "description": "Meta field value (can be any type)"
+                                "type": "string",
+                                "description": "New value for the meta field"
                             }
                         }
                     }
@@ -94,7 +115,11 @@ def user_current_tool() -> Tool:
     """Define the current user tool."""
     return Tool(
         name="user_current",
-        description="Get information about the currently authenticated user.",
+        description="""Get the currently authenticated user's profile.
+
+Returns: username, ID, display name (alias), title, active status, language, timezone, and assigned roles (e.g. ROLE_ADMIN, ROLE_TEAMLEAD, ROLE_USER).
+
+WHEN TO USE: Use this to find out your own user ID (needed for timesheet filters with user_scope=specific), confirm which account is connected, or check your roles/permissions.""",
         inputSchema={
             "type": "object",
             "properties": {}

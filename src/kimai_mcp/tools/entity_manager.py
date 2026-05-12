@@ -36,15 +36,22 @@ def entity_tool() -> Tool:
     """Define the consolidated entity management tool."""
     return Tool(
         name="entity",
-        description="""Universal entity management for Kimai (projects, activities, customers, users, teams, tags, invoices, holidays).
+        description="""Universal CRUD manager for all Kimai entities: projects, activities, customers, users, teams, tags, invoices, holidays.
 
 COMMON TASKS:
-- Change vacation days: action=set_preferences, type=user, id=USER_ID, preferences=[{name:"holidays", value:"25"}]
-- Lock timesheet month: action=lock_month, type=user, id=USER_ID, month="2024-12-01"
-- Create project: action=create, type=project, data={name:"...", customer:ID}
+- List all projects:          type="project",  action="list"
+- Find activity by name:      type="activity", action="list", filters={term:"Meeting"}
+- Create project:             type="project",  action="create", data={name:"New Project", customer:ID}
+- Create customer:            type="customer", action="create", data={name:"ACME", country:"DE", currency:"EUR", timezone:"Europe/Berlin"}
+- Deactivate user:            type="user",     action="update", id=USER_ID, data={enabled:false}
+- Change vacation days:       type="user",     action="set_preferences", id=USER_ID, preferences=[{name:"holidays", value:"25"}]
+- Set 40h work week:          type="user",     action="set_preferences", id=USER_ID, preferences=[{name:"work_contract_type",value:"week"},{name:"hours_per_week",value:"144000"}]
+- Lock timesheet month:       type="user",     action="lock_month",    id=USER_ID, month="2025-01-01"
+- Lock month for all users:   type="user",     action="lock_month",    user_scope="all", month="2025-01-01"
 
 USER PREFERENCES (action=set_preferences, type=user only):
-  holidays (vacation days), hours_per_week, work_contract_type, work_monday..work_sunday""",
+  holidays (vacation days), hours_per_week, work_contract_type, work_monday..work_sunday
+  See preferences parameter for all options and value formats.""",
         inputSchema={
             "type": "object",
             "required": ["type", "action"],
@@ -75,37 +82,72 @@ USER PREFERENCES (action=set_preferences, type=user only):
                 },
                 "filters": {
                     "type": "object",
-                    "description": "Filters for list action (e.g., visible, term, customer, project)",
+                    "description": "Filters for list action. Not all filters apply to every entity type.",
                     "properties": {
-                        "visible": {"type": "integer", "enum": [1, 2, 3], "description": "1=visible, 2=hidden, 3=both"},
-                        "term": {"type": "string",
-                                 "description": "Search exact term. For entity types other then invoice and holiday you can just list all if you don't find it on first try."},
-                        "customer": {"type": "integer", "description": "Customer ID filter (for projects)"},
-                        "project": {"type": "integer", "description": "Project ID filter (for activities)"},
-                        "globals": {"type": "string", "enum": ["0", "1"], "description": "Global activities filter"},
-                        "page": {"type": "integer", "description": "Page number"},
-                        "size": {"type": "integer", "description": "Page size"},
-                        "order_by": {"type": "string", "description": "Sort field"},
-                        "order": {"type": "string", "enum": ["ASC", "DESC"], "description": "Sort order"},
+                        "visible": {
+                            "type": "integer",
+                            "enum": [1, 2, 3],
+                            "description": "1 = active/visible only (default), 2 = hidden/inactive only, 3 = all"
+                        },
+                        "term": {
+                            "type": "string",
+                            "description": "Name search filter. Tip: if not found, try listing all without a term — the list is usually small enough."
+                        },
+                        "customer": {
+                            "type": "integer",
+                            "description": "Filter projects by customer ID"
+                        },
+                        "project": {
+                            "type": "integer",
+                            "description": "Filter activities by project ID"
+                        },
+                        "globals": {
+                            "type": "string",
+                            "enum": ["0", "1"],
+                            "description": "0 = project-specific activities only, 1 = global activities only (activities not linked to a project)"
+                        },
+                        "page": {"type": "integer", "description": "Page number for pagination (default: 1)"},
+                        "size": {"type": "integer", "description": "Records per page (default: varies by entity)"},
+                        "order_by": {
+                            "type": "string",
+                            "description": "Field to sort by. Common values: 'name', 'id', 'customer'. Depends on entity type."
+                        },
+                        "order": {
+                            "type": "string",
+                            "enum": ["ASC", "DESC"],
+                            "description": "Sort direction: ASC (a→z, oldest first) or DESC (z→a, newest first)"
+                        },
                         "begin": {
                             "type": "string",
                             "format": "date-time",
-                            "description": "Start date and time filter (format: YYYY-MM-DDThh:mm:ss, e.g., 2023-10-27T09:30:00) Only records after this date will be included."
+                            "description": "Start boundary filter (ISO 8601: YYYY-MM-DDTHH:MM:SS). For invoices: invoice date on or after this value."
                         },
                         "end": {
                             "type": "string",
                             "format": "date-time",
-                            "description": "End date and time filter (format: YYYY-MM-DDThh:mm:ss, e.g., 2023-10-27T17:00:00). Only records before this date will be included."
+                            "description": "End boundary filter (ISO 8601: YYYY-MM-DDTHH:MM:SS). For invoices: invoice date on or before this value."
                         },
-                        "customers": {"type": "array", "items": {"type": "integer"},
-                                      "description": "Customer IDs (for invoices)"},
-                        "status": {"type": "array", "items": {"type": "string"},
-                                   "description": "Status filter (for invoices)"}
+                        "customers": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "Filter invoices by customer IDs"
+                        },
+                        "status": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Filter invoices by status (e.g. ['new', 'pending', 'paid'])"
+                        }
                     }
                 },
                 "data": {
                     "type": "object",
-                    "description": "Data for create/update actions (entity-specific fields)",
+                    "description": """Entity fields for create/update actions. Required fields per type:
+- project: name (string), customer (integer ID)
+- activity: name (string). Add project (integer ID) for project-specific activity; omit for global.
+- customer: name (string), country (2-letter ISO, e.g. "DE"), currency (3-letter ISO, e.g. "EUR"), timezone (e.g. "Europe/Berlin")
+- user: username (string), email (string), plainPassword (string, create only), roles (array, e.g. ["ROLE_USER"])
+- team: name (string)
+- tag: name (string)""",
                     "additionalProperties": True
                 },
                 "month": {
@@ -125,32 +167,58 @@ USER PREFERENCES (action=set_preferences, type=user only):
                 },
                 "preferences": {
                     "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string", "description": "Preference name"},
-                            "value": {"type": "string", "description": "Preference value"}
-                        },
-                        "required": ["name"]
-                    },
-                    "description": """List of preferences for set_preferences action (type=user only).
+                    "description": """List of user preferences for set_preferences action (type=user, action=set_preferences only).
+Each entry is {name, value} — all values must be strings.
 
 VACATION:
-- holidays: Vacation days per year (e.g., "25", "30"). Aliases: vacation_days, annual_leave
+  holidays            Vacation days per year as string, e.g. "25"
+                      Aliases: vacation_days, annual_leave, vacation
 
-WORK CONTRACT:
-- work_contract_type: "week" (weekly hours) or "day" (daily hours)
-- hours_per_week: Weekly hours in seconds (144000 = 40h, 126000 = 35h). Alias: weekly_hours
-- work_monday..work_sunday: Daily hours in seconds (28800 = 8h, 0 = no work)
-- work_days_week: Work days as "1,2,3,4,5" (1=Monday)
+WORK CONTRACT TYPE (set this first):
+  work_contract_type  "week" = total weekly hours mode
+                      "day"  = per-weekday hours mode
+
+WEEKLY HOURS MODE (use when work_contract_type="week"):
+  hours_per_week      Total hours per week in seconds as string
+                      144000="40h", 162000="45h", 126000="35h", 72000="20h"
+                      Alias: weekly_hours
+
+DAILY HOURS MODE (use when work_contract_type="day"):
+  work_monday         Hours on Monday in seconds, e.g. "28800"=8h, "0"=no work
+  work_tuesday        Hours on Tuesday in seconds
+  work_wednesday      Hours on Wednesday in seconds
+  work_thursday       Hours on Thursday in seconds
+  work_friday         Hours on Friday in seconds
+  work_saturday       Hours on Saturday in seconds (usually "0")
+  work_sunday         Hours on Sunday in seconds (usually "0")
+  work_days_week      Comma-separated work days: "1,2,3,4,5" (1=Mon, 5=Fri)
 
 CONTRACT PERIOD:
-- work_start_day: Contract start date (YYYY-MM-DD)
-- work_last_day: Contract end date (YYYY-MM-DD)
+  work_start_day      Contract start date (YYYY-MM-DD), e.g. "2024-01-01"
+  work_last_day       Contract end date (YYYY-MM-DD), omit for open-ended
 
-OTHER:
-- public_holiday_group: Holiday region ID (e.g., "1")
-- hourly_rate/internal_rate: User rates"""
+PUBLIC HOLIDAYS:
+  public_holiday_group  Holiday region ID as string, e.g. "1"
+
+USER RATES:
+  hourly_rate         Default billing rate in currency units, e.g. "80"
+  internal_rate       Internal cost rate, e.g. "60"
+
+EXAMPLE — Set 40h/week contract with 30 vacation days:
+  preferences=[
+    {name:"work_contract_type", value:"week"},
+    {name:"hours_per_week",     value:"144000"},
+    {name:"holidays",           value:"30"},
+    {name:"work_start_day",     value:"2025-01-01"}
+  ]""",
+                    "items": {
+                        "type": "object",
+                        "required": ["name", "value"],
+                        "properties": {
+                            "name": {"type": "string", "description": "Preference name (see description for valid names and aliases)"},
+                            "value": {"type": "string", "description": "Preference value as string"}
+                        }
+                    }
                 }
             },
             "allOff": [

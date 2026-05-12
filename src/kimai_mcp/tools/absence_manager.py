@@ -31,16 +31,28 @@ NOTE: To change annual vacation days quota, use entity tool with set_preferences
                 "action": {
                     "type": "string",
                     "enum": ["list", "statistics", "types", "create", "delete", "approve", "reject", "request", "attendance", "batch_delete", "batch_approve", "batch_reject"],
-                    "description": "The action to perform"
+                    "description": """Action to perform:
+- list: List absences. Use filters.user_scope and filters.begin/end to narrow results.
+- statistics: Absence summary statistics. Use filters.user_scope and group_by.
+- types: List all available absence types (and their translations).
+- create: Create an absence. Requires data.type and data.date. Use data.end for multi-day.
+- delete: Delete an absence by id.
+- approve: Approve a pending absence by id (requires manager permission).
+- reject: Reject a pending absence by id (requires manager permission).
+- request: Submit an absence for approval by id.
+- attendance: Show attendance/absence status for a specific date (defaults to today).
+- batch_delete: Delete multiple absences. Requires ids=[...].
+- batch_approve: Approve multiple absences. Requires ids=[...].
+- batch_reject: Reject multiple absences. Requires ids=[...]."""
                 },
                 "ids": {
                     "type": "array",
                     "items": {"type": "integer"},
-                    "description": "List of absence IDs for batch operations (batch_delete, batch_approve, batch_reject)"
+                    "description": "List of absence IDs — required for batch_delete, batch_approve, batch_reject"
                 },
                 "id": {
                     "type": "integer",
-                    "description": "Absence ID (required for delete, approve, reject, request actions)"
+                    "description": "Absence ID — required for delete, approve, reject, request actions"
                 },
                 "filters": {
                     "type": "object",
@@ -49,66 +61,66 @@ NOTE: To change annual vacation days quota, use entity tool with set_preferences
                         "user_scope": {
                             "type": "string",
                             "enum": ["self", "all", "specific"],
-                            "description": "User scope: 'self' (current user), 'all' (all users), 'specific' (particular user)",
+                            "description": "self: current user only (default). all: all users (requires manager permission). specific: one user — also set filters.user to the user ID.",
                             "default": "self"
                         },
                         "user": {
-                            "type": "string",
-                            "description": "User ID when user_scope is 'specific'"
+                            "type": "integer",
+                            "description": "User ID — required when user_scope is 'specific'"
                         },
                         "begin": {
                             "type": "string",
                             "format": "date",
-                            "description": "Start date filter (YYYY-MM-DD)"
+                            "description": "Show absences starting on or after this date (YYYY-MM-DD, e.g. 2025-01-01)"
                         },
                         "end": {
                             "type": "string",
                             "format": "date",
-                            "description": "End date filter (YYYY-MM-DD)"
+                            "description": "Show absences ending on or before this date (YYYY-MM-DD, e.g. 2025-12-31)"
                         },
                         "status": {
                             "type": "string",
                             "enum": ["approved", "open", "all"],
-                            "description": "Status filter",
+                            "description": "approved: only confirmed absences. open: pending/requested. all: both (default).",
                             "default": "all"
                         }
                     }
                 },
                 "data": {
                     "type": "object",
-                    "description": "Data for create action",
+                    "description": "Absence data — required for create action",
+                    "required": ["type", "date"],
                     "properties": {
-                        "comment": {
+                        "type": {
                             "type": "string",
-                            "description": "Comment/reason for the absence"
+                            "enum": ["holiday", "time_off", "sickness", "sickness_child", "other", "parental", "unpaid_vacation"],
+                            "description": "Absence type — required. holiday=planned vacation, time_off=comp time, sickness=sick leave, sickness_child=child sick leave, parental=parental leave, unpaid_vacation=unpaid leave, other=other."
                         },
                         "date": {
                             "type": "string",
                             "format": "date",
-                            "description": "Start date of absence (YYYY-MM-DD)"
-                        },
-                        "type": {
-                            "type": "string",
-                            "enum": ["holiday", "time_off", "sickness", "sickness_child", "other", "parental", "unpaid_vacation"],
-                            "description": "Type of absence",
-                            "default": "other"
-                        },
-                        "user": {
-                            "type": "integer",
-                            "description": "User ID (requires permission, defaults to current user)"
+                            "description": "Start date of absence (YYYY-MM-DD) — required"
                         },
                         "end": {
                             "type": "string",
                             "format": "date",
-                            "description": "End date for multi-day absences"
+                            "description": "End date for multi-day absences (YYYY-MM-DD). If omitted, creates a single-day absence. Cannot be combined with halfDay=true."
                         },
                         "halfDay": {
                             "type": "boolean",
-                            "description": "Whether this is a half-day absence"
+                            "description": "true = half-day absence (morning or afternoon). Cannot be combined with a multi-day end date. Omit for full-day absences."
+                        },
+                        "comment": {
+                            "type": "string",
+                            "description": "Optional reason or note for the absence"
+                        },
+                        "user": {
+                            "type": "integer",
+                            "description": "User ID — defaults to current user. Set to create an absence for another user (requires manager permission)."
                         },
                         "duration": {
                             "type": "string",
-                            "description": "Duration in Kimai format"
+                            "description": "Duration in Kimai format (usually not needed — omit and let Kimai calculate from date/end)"
                         }
                     }
                 },
