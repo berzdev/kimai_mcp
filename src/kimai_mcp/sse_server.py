@@ -467,8 +467,8 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ssl-verify",
         metavar="VALUE",
-        default="true",
-        help="SSL verification for Kimai: 'true' (default), 'false', or path to CA cert",
+        help="SSL verification for Kimai: 'true' (default), 'false', or path to CA cert "
+             "(env: KIMAI_SSL_VERIFY)",
     )
     parser.add_argument(
         "--mtls-cert",
