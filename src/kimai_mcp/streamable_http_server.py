@@ -30,7 +30,7 @@ from mcp.server import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import Tool, TextContent
 
-from .client import KimaiClient, KimaiAPIError
+from .client import KimaiClient, KimaiAPIError, resolve_mtls_cert
 from .server import __version__
 from .user_config import UsersConfig, UserConfig
 from .security import (
@@ -87,6 +87,8 @@ class UserMCPSession:
             base_url=self.config.kimai_url,
             api_token=self.config.kimai_token,
             ssl_verify=self.config.ssl_verify,
+            mtls_cert=resolve_mtls_cert(
+                self.config.mtls_cert_file, self.config.mtls_key_file),
         )
 
         # Verify connection

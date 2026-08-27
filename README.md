@@ -102,6 +102,8 @@ For Claude Desktop with remote server access:
 | `--kimai-token TOKEN` | API authentication token from your Kimai user profile |
 | `--kimai-user USER_ID` | Default user ID for operations (optional) |
 | `--ssl-verify VALUE` | SSL verification: `true` (default), `false`, or path to CA certificate |
+| `--mtls-cert PATH` | Client certificate PEM for an mTLS-gated proxy in front of Kimai |
+| `--mtls-key PATH` | Private key PEM belonging to `--mtls-cert` |
 | `--setup` | Interactive setup wizard for Claude Desktop configuration |
 | `--help` | Show help message and exit |
 | `--version` | Show version number and exit |
@@ -270,6 +272,37 @@ Then use this Claude Desktop configuration:
   }
 }
 ```
+
+#### mTLS: Kimai behind a client-certificate-gated proxy
+
+If your Kimai instance sits behind a reverse proxy that demands a **client**
+certificate, the proxy rejects the connection before Kimai's own bearer-token
+auth ever runs. Point the server at a client certificate and it will present it
+during the TLS handshake:
+
+```bash
+# .env — in addition to KIMAI_URL / KIMAI_API_TOKEN
+KIMAI_MTLS_CERT_FILE=/path/to/client.crt.pem
+KIMAI_MTLS_KEY_FILE=/path/to/client.key.pem
+# KIMAI_MTLS_KEY_PASSWORD=...   # only for an encrypted private key
+```
+
+Equivalent CLI flags: `--mtls-cert` / `--mtls-key`. If the certificate PEM
+already contains the private key, `KIMAI_MTLS_KEY_FILE` can be omitted.
+
+Notes:
+
+- This is orthogonal to `KIMAI_SSL_VERIFY`, which controls how the *server's*
+  certificate is verified. A proxy with a publicly trusted certificate needs
+  mTLS vars only; one with an internal CA needs both.
+- A missing certificate/key file raises a clear error at startup rather than
+  surfacing as an opaque TLS handshake failure at the first request.
+- Multi-user servers can override per user with
+  `KIMAI_USER_<SLUG>_MTLS_CERT_FILE` / `_MTLS_KEY_FILE`, or the
+  `mtls_cert_file` / `mtls_key_file` keys in the users config JSON. Users
+  without their own values fall back to the process-wide vars.
+- Leave all of these unset and behaviour is unchanged — no client certificate
+  is sent.
 
 #### Method 2: Using Environment Variables (System-wide)
 If you prefer system environment variables, you can set:

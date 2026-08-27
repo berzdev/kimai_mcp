@@ -18,6 +18,10 @@ class UserConfig(BaseModel):
     kimai_token: str = Field(..., description="Kimai API token")
     kimai_user_id: Optional[str] = Field(None, description="Default user ID for operations")
     ssl_verify: Union[bool, str] = Field(True, description="SSL verification setting")
+    mtls_cert_file: Optional[str] = Field(
+        None, description="Client certificate PEM for an mTLS-gated proxy in front of Kimai")
+    mtls_key_file: Optional[str] = Field(
+        None, description="Private key PEM belonging to mtls_cert_file")
 
     @field_validator("kimai_url")
     @classmethod
@@ -106,6 +110,11 @@ class UsersConfig(BaseModel):
            KIMAI_USER_MAX_TOKEN=xxx
            KIMAI_USER_MAX_USER_ID=1 (optional)
            KIMAI_USER_MAX_SSL_VERIFY=true (optional)
+           KIMAI_USER_MAX_MTLS_CERT_FILE=/path/client.crt.pem (optional)
+           KIMAI_USER_MAX_MTLS_KEY_FILE=/path/client.key.pem (optional)
+
+        Users without their own mTLS vars fall back to the process-wide
+        KIMAI_MTLS_CERT_FILE / KIMAI_MTLS_KEY_FILE, resolved in KimaiClient.
         """
         users = {}
 
@@ -140,12 +149,16 @@ class UsersConfig(BaseModel):
 
                 user_id_key = f"{prefix}{slug.upper()}_USER_ID"
                 ssl_key = f"{prefix}{slug.upper()}_SSL_VERIFY"
+                mtls_cert_key = f"{prefix}{slug.upper()}_MTLS_CERT_FILE"
+                mtls_key_key = f"{prefix}{slug.upper()}_MTLS_KEY_FILE"
 
                 users[slug] = UserConfig(
                     kimai_url=value,
                     kimai_token=token,
                     kimai_user_id=os.getenv(user_id_key),
                     ssl_verify=os.getenv(ssl_key, "true"),
+                    mtls_cert_file=os.getenv(mtls_cert_key),
+                    mtls_key_file=os.getenv(mtls_key_key),
                 )
                 logger.info(f"Loaded config for user '{slug}' from env vars")
 

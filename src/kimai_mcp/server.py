@@ -24,7 +24,7 @@ except ImportError:
 from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
 from mcp.types import Tool, TextContent
-from .client import KimaiClient, KimaiAPIError
+from .client import KimaiClient, KimaiAPIError, MTLSCert, resolve_mtls_cert
 
 # Import consolidated tools
 from .tools.entity_manager import entity_tool, handle_entity
@@ -47,7 +47,9 @@ class KimaiMCPServer:
 
     def __init__(self, base_url: Optional[str] = None, api_token: Optional[str] = None,
                  default_user_id: Optional[str] = None,
-                 ssl_verify: Optional[Union[bool, str]] = None):
+                 ssl_verify: Optional[Union[bool, str]] = None,
+                 mtls_cert_file: Optional[str] = None,
+                 mtls_key_file: Optional[str] = None):
         """Initialize the consolidated Kimai MCP server.
 
         Args:
@@ -58,6 +60,12 @@ class KimaiMCPServer:
                 - True: Use default CA bundle (default)
                 - False: Disable SSL verification (not recommended)
                 - str: Path to CA certificate file or directory
+            mtls_cert_file: Client certificate PEM presented to an mTLS-gated
+                reverse proxy in front of Kimai (can also be set via
+                KIMAI_MTLS_CERT_FILE env var)
+            mtls_key_file: Private key PEM for that certificate (can also be
+                set via KIMAI_MTLS_KEY_FILE env var; KIMAI_MTLS_KEY_PASSWORD
+                for an encrypted key)
         """
         self.server = Server("kimai-mcp-consolidated")
         self.client: Optional[KimaiClient] = None
@@ -85,6 +93,9 @@ class KimaiMCPServer:
                 # Treat as path to certificate
                 self.ssl_verify = ssl_env
 
+        # mTLS client certificate - prefer arguments, fallback to environment
+        self.mtls_cert: Optional[MTLSCert] = resolve_mtls_cert(mtls_cert_file, mtls_key_file)
+
         # Validate configuration
         if not self.base_url:
             raise ValueError(
@@ -96,7 +107,8 @@ class KimaiMCPServer:
     async def _ensure_client(self):
         """Ensure the Kimai client is initialized."""
         if not self.client:
-            self.client = KimaiClient(self.base_url, self.api_token, ssl_verify=self.ssl_verify)
+            self.client = KimaiClient(self.base_url, self.api_token, ssl_verify=self.ssl_verify,
+                                      mtls_cert=self.mtls_cert)
 
     async def _list_tools(self) -> List[Tool]:
         """List consolidated MCP tools (10 tools instead of 73)."""
@@ -255,6 +267,17 @@ def create_parser() -> argparse.ArgumentParser:
         metavar="VALUE",
         default="true",
         help="SSL verification: 'true' (default), 'false', or path to CA certificate"
+    )
+    parser.add_argument(
+        "--mtls-cert",
+        metavar="PATH",
+        help="Client certificate PEM for an mTLS-gated proxy in front of Kimai "
+             "(env: KIMAI_MTLS_CERT_FILE)"
+    )
+    parser.add_argument(
+        "--mtls-key",
+        metavar="PATH",
+        help="Private key PEM for --mtls-cert (env: KIMAI_MTLS_KEY_FILE)"
     )
     parser.add_argument(
         "--setup",
@@ -417,7 +440,9 @@ async def main():
         base_url=args.kimai_url,
         api_token=args.kimai_token,
         default_user_id=args.kimai_user,
-        ssl_verify=ssl_verify
+        ssl_verify=ssl_verify,
+        mtls_cert_file=args.mtls_cert,
+        mtls_key_file=args.mtls_key
     )
     try:
         await server.run()

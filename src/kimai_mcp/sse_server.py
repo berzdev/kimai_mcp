@@ -67,6 +67,8 @@ class RemoteMCPServer:
         self,
         default_kimai_url: Optional[str] = None,
         ssl_verify: Optional[Union[bool, str]] = None,
+        mtls_cert_file: Optional[str] = None,
+        mtls_key_file: Optional[str] = None,
         server_token: Optional[str] = None,
         host: str = "0.0.0.0",
         port: int = 8000,
@@ -81,6 +83,10 @@ class RemoteMCPServer:
         Args:
             default_kimai_url: Default Kimai server URL (clients can override)
             ssl_verify: SSL verification setting for Kimai connections
+            mtls_cert_file: Client certificate PEM for an mTLS-gated proxy in
+                front of Kimai (env: KIMAI_MTLS_CERT_FILE)
+            mtls_key_file: Private key PEM for that certificate
+                (env: KIMAI_MTLS_KEY_FILE)
             server_token: Authentication token for MCP server access (generated if not provided)
             host: Host to bind the server to
             port: Port to bind the server to
@@ -92,6 +98,8 @@ class RemoteMCPServer:
         """
         self.default_kimai_url = (default_kimai_url or "").rstrip('/')
         self.ssl_verify = ssl_verify
+        self.mtls_cert_file = mtls_cert_file
+        self.mtls_key_file = mtls_key_file
         self.host = host
         self.port = port
         self.allowed_origins = allowed_origins or ["*"]
@@ -194,6 +202,8 @@ class RemoteMCPServer:
             api_token=kimai_token,
             default_user_id=user_id,
             ssl_verify=self.ssl_verify,
+            mtls_cert_file=self.mtls_cert_file,
+            mtls_key_file=self.mtls_key_file,
         )
 
         # Initialize client
@@ -461,6 +471,17 @@ def create_parser() -> argparse.ArgumentParser:
         help="SSL verification for Kimai: 'true' (default), 'false', or path to CA cert",
     )
     parser.add_argument(
+        "--mtls-cert",
+        metavar="PATH",
+        help="Client certificate PEM for an mTLS-gated proxy in front of Kimai "
+             "(env: KIMAI_MTLS_CERT_FILE)",
+    )
+    parser.add_argument(
+        "--mtls-key",
+        metavar="PATH",
+        help="Private key PEM for --mtls-cert (env: KIMAI_MTLS_KEY_FILE)",
+    )
+    parser.add_argument(
         "--allowed-origins",
         nargs="+",
         metavar="ORIGIN",
@@ -543,6 +564,8 @@ def main():
     server = RemoteMCPServer(
         default_kimai_url=default_kimai_url,
         ssl_verify=ssl_verify,
+        mtls_cert_file=args.mtls_cert,
+        mtls_key_file=args.mtls_key,
         server_token=server_token,
         host=args.host,
         port=args.port,

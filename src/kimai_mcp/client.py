@@ -2,7 +2,10 @@
 
 from typing import Dict, List, Optional, Any, Union, Tuple
 import logging
+import os
+import ssl
 from datetime import datetime
+from pathlib import Path
 import httpx
 
 from .models import (
@@ -22,6 +25,107 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 
+# httpx accepts either a single combined PEM path, a (cert, key) pair, or a
+# (cert, key, password) triple for the client certificate.
+MTLSCert = Union[str, Tuple[str, str], Tuple[str, str, str]]
+
+
+def resolve_mtls_cert(
+    cert_file: Optional[str] = None,
+    key_file: Optional[str] = None,
+    key_password: Optional[str] = None,
+) -> Optional[MTLSCert]:
+    """Resolve an mTLS client certificate for httpx.
+
+    Arguments take precedence; anything omitted falls back to the environment:
+    ``KIMAI_MTLS_CERT_FILE``, ``KIMAI_MTLS_KEY_FILE``, ``KIMAI_MTLS_KEY_PASSWORD``.
+
+    This is needed when the Kimai instance sits behind a reverse proxy that
+    demands a client certificate *before* Kimai's own bearer-token auth runs.
+
+    Args:
+        cert_file: Path to the client certificate PEM. May also contain the
+            private key, in which case ``key_file`` can be omitted.
+        key_file: Path to the private key PEM (unencrypted, or paired with
+            ``key_password``).
+        key_password: Passphrase for an encrypted private key.
+
+    Returns:
+        A value suitable for httpx's ``cert=`` argument, or None if no client
+        certificate is configured.
+
+    Raises:
+        ValueError: If a key is given without a certificate, or if a
+            configured file does not exist. Failing loudly here beats a
+            confusing TLS handshake error later.
+    """
+    cert_file = cert_file or os.getenv("KIMAI_MTLS_CERT_FILE") or None
+    key_file = key_file or os.getenv("KIMAI_MTLS_KEY_FILE") or None
+    key_password = key_password or os.getenv("KIMAI_MTLS_KEY_PASSWORD") or None
+
+    if not cert_file:
+        if key_file:
+            raise ValueError(
+                "mTLS key file configured without a certificate file "
+                "(set KIMAI_MTLS_CERT_FILE too)")
+        return None
+
+    for label, path in (("certificate", cert_file), ("key", key_file)):
+        if path and not Path(path).is_file():
+            raise ValueError(f"mTLS {label} file not found: {path}")
+
+    if key_file and key_password:
+        return (cert_file, key_file, key_password)
+    if key_file:
+        return (cert_file, key_file)
+    return cert_file
+
+
+def build_ssl_context(
+    ssl_verify: Union[bool, str],
+    mtls_cert: MTLSCert,
+) -> ssl.SSLContext:
+    """Build an SSL context that presents a client certificate.
+
+    httpx's own ``cert=`` argument cannot be relied on here: since httpx 0.28
+    ``create_ssl_context()`` returns early when ``verify`` is a string path,
+    silently dropping ``cert`` — the connection is then made *without* a client
+    certificate and fails at the proxy with an opaque read error. Building the
+    context ourselves works identically on httpx 0.27 and 0.28+, and avoids the
+    deprecation warnings both arguments now carry.
+
+    Args:
+        ssl_verify: Server certificate verification — True (default CA bundle),
+            False (disabled), or a path to a CA file or directory.
+        mtls_cert: Client certificate as returned by :func:`resolve_mtls_cert`.
+
+    Returns:
+        A context suitable for httpx's ``verify=`` argument.
+    """
+    if ssl_verify is False:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    elif isinstance(ssl_verify, str):
+        if os.path.isdir(ssl_verify):
+            ctx = ssl.create_default_context(capath=ssl_verify)
+        else:
+            ctx = ssl.create_default_context(cafile=ssl_verify)
+    else:
+        # Match httpx's default trust store rather than the system one.
+        try:
+            import certifi
+            ctx = ssl.create_default_context(cafile=certifi.where())
+        except ImportError:  # pragma: no cover - certifi ships with httpx
+            ctx = ssl.create_default_context()
+
+    if isinstance(mtls_cert, str):
+        ctx.load_cert_chain(mtls_cert)
+    else:
+        ctx.load_cert_chain(*mtls_cert)
+    return ctx
+
+
 class KimaiAPIError(Exception):
     """Kimai API error."""
 
@@ -36,7 +140,8 @@ class KimaiClient:
     """Kimai API client."""
 
     def __init__(self, base_url: str, api_token: str, timeout: float = 30.0,
-                 ssl_verify: Union[bool, str] = True):
+                 ssl_verify: Union[bool, str] = True,
+                 mtls_cert: Optional[MTLSCert] = None):
         """Initialize Kimai client.
 
         Args:
@@ -47,11 +152,20 @@ class KimaiClient:
                 - True: Use default CA bundle (default)
                 - False: Disable SSL verification (not recommended)
                 - str: Path to CA certificate file or directory
+            mtls_cert: Client certificate presented to the server, for
+                instances behind an mTLS-gated reverse proxy. Either a single
+                combined PEM path, a (cert, key) pair, or a
+                (cert, key, password) triple. If omitted, it is read from
+                KIMAI_MTLS_CERT_FILE / KIMAI_MTLS_KEY_FILE /
+                KIMAI_MTLS_KEY_PASSWORD.
         """
         self.base_url = base_url.rstrip('/')
         self.api_token = api_token
         self.timeout = timeout
         self.ssl_verify = ssl_verify
+        self.mtls_cert = mtls_cert if mtls_cert is not None else resolve_mtls_cert()
+        if self.mtls_cert:
+            logger.info("Using mTLS client certificate for Kimai connection")
         self._client = self._build_client()
     
     async def __aenter__(self):
@@ -76,7 +190,10 @@ class KimaiClient:
                 "Accept": "application/json"
             },
             timeout=self.timeout,
-            verify=self.ssl_verify
+            # With a client certificate configured we hand httpx a fully built
+            # SSL context; see build_ssl_context() for why cert= is not used.
+            verify=(build_ssl_context(self.ssl_verify, self.mtls_cert)
+                    if self.mtls_cert else self.ssl_verify)
         )
 
     async def _request(self, method: str, endpoint: str, **kwargs) -> Union[Dict, List]:
